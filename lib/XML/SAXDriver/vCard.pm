@@ -23,7 +23,7 @@ use strict;
 package XML::SAXDriver::vCard;
 use base qw (XML::SAX::Base);
 
-$XML::SAXDriver::vCard::VERSION = '0.01';
+$XML::SAXDriver::vCard::VERSION = '0.02';
 
 use constant NS => {
 		    "VCARD" => "http://www.ietf.org/internet-drafts/draft-dawson-vCard-xml-dtd-04.txt",
@@ -54,14 +54,9 @@ sub parse {
   }
 
   $self->start_document();
-
-  foreach (split("\n",$str)) {
-    my $ln = $_;
-    chomp $ln;
-    $self->_parse($ln);
-  }
-
+  $self->_parse_str($str);
   $self->end_document();
+
   return 1;
 }
 
@@ -80,14 +75,9 @@ sub parse_file {
     || die "Can't open '$vcard', $!\n";
 
   $self->start_document();
-
-  while (! $fh->eof()) {
-    my $ln = $fh->getline();
-    chomp $ln;
-    $self->_parse($ln);
-  }
-
+  $self->_parse_file(\*$fh);
   $self->end_document();
+
   return 1;
 }
 
@@ -107,23 +97,46 @@ sub parse_uri {
   return $self->parse(LWP::Simple::get($uri));
 }
 
+# Private methods
 
-sub end_document {
+sub _parse_str {
   my $self = shift;
+  my $str  = shift;
+
+  my %card = ();
+
+  foreach (split("\n",$str)) {
+
+    if (! $self->_parse_ln($_,\%card)) {
+      %card = ();
+    }
+  }
+
   return 1;
 }
 
-# Private methods
-
-sub _parse {
+sub _parse_file {
   my $self = shift;
-  my $ln   = shift;
+  my $fh   = shift;
 
-  # These are the properties you are looking for.
+  my %card = ();
 
-  if ($ln =~ /^[DHIJQVWYZ]/) {
-    return;
+  while (! $fh->eof()) {
+    my $ln = $fh->getline();
+    chomp $ln;
+
+    if (! $self->_parse_ln($ln,\%card)) {
+      %card = ();
+    }
   }
+
+  return 1;
+}
+
+sub _parse_ln {
+  my $self  = shift;
+  my $ln    = shift;
+  my $vcard = shift;
 
   # Danger, Will Robinson!
   # Un-SAX like behaviour ahead.Specifically, we are going to
@@ -142,10 +155,28 @@ sub _parse {
   # only a small set of properties and then add them at the end 
   # using XML::SAX::Merger. Ultimately, I decided that was crazy-talk.
 
+  # These are the properties you are looking for.
+
+  if ($ln =~ /^[DHIJQVWYZ]/) {
+    return 1;
+  }
+
+  # AGENT properties are parsed separately when the current vCard
+  # is rendered. So we'll just keep track of the agent's vcard data
+  # as a big ol' string.
+
+  elsif ($vcard->{'__isagent'}) {
+    $vcard->{agent}{vcard} .= $ln."\n";
+    if ($ln =~ /^EN/) { $vcard->{'__isagent'} = 0; }
+    return 1;
+  }
+
+  else {}
+
   # FN
-  elsif ($ln =~ /^F/) {
+  if ($ln =~ /^F/) {
     $ln =~ /^FN:(.*)$/;
-    $self->{'__vcard'}{fn} = $1;
+    $vcard->{fn} = $1;
   }
 
   # N
@@ -153,31 +184,31 @@ sub _parse {
     # Family Name, Given Name, Additional Names, 
     # Honorific Prefixes, and Honorific Suffixes.
     $ln =~ /^N:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/;
-    $self->{'__vcard'}{n} = {family=>$1,given=>$2,other=>$3,prefixes=>$4,suffixes=>$5};
+    $vcard->{n} = {family=>$1,given=>$2,other=>$3,prefixes=>$4,suffixes=>$5};
   }
 
   # NICKNAME
   elsif ($ln =~ /^NI/) {
     $ln =~ /^NICKNAME:(.*)$/;
-    $self->{'__vcard'}{nickname} = $1;
+    $vcard->{nickname} = $1;
   }
 
   # PHOTO
   elsif ($ln =~ /^PHOT/) {
     $ln =~ /^PHOTO;(?:VALUE=uri:(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/;
-    $self->{'__vcard'}{photo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
+    $vcard->{photo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
   }
 
   # BDAY
   elsif ($ln =~ /^BD/) {
     $ln =~ /^BDAY:(.*)$/;
-    $self->{'__vcard'}{bday} = $1;
+    $vcard->{bday} = $1;
   }
 
   # ADR
   if ($ln =~ /^AD/) {
     $ln =~ /^ADR;TYPE=([^:]+)?:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/i;
-    push @{$self->{'__vcard'}{adr}} , {"type"=>$1,pobox=>$2,extadr=>$3,street=>$4,locality=>$4,region=>$5,pcode=>$6,country=>$7};
+    push @{$vcard->{adr}} , {"type"=>$1,pobox=>$2,extadr=>$3,street=>$4,locality=>$4,region=>$5,pcode=>$6,country=>$7};
   }
 
   # LABEL
@@ -187,137 +218,175 @@ sub _parse {
   # TEL
   elsif ($ln =~ /^TE/) {
     $ln =~ /^TEL;TYPE=([^:]+)?:(.*)$/;
-    push @{$self->{'__vcard'}{tel}},{"type"=>$1,number=>$2};
+    push @{$vcard->{tel}},{"type"=>$1,number=>$2};
   }
 
   # EMAIL
   elsif ($ln =~ /^EM/) {
     $ln =~ /^EMAIL;([^:]+)?:(.*)$/;
-    push @{$self->{'__vcard'}{email}},{"type"=>$1,address=>$2};
+    push @{$vcard->{email}},{"type"=>$1,address=>$2};
   }
 
   # MAILER
   elsif ($ln =~ /^M/) {
     $ln =~ /^MAILER;(.*)$/;
-    $self->{'__vcard'}{mailer} = $1;
+    $vcard->{mailer} = $1;
   }
 
   # TZ
   elsif ($ln =~ /^TZ/) {
     $ln =~ /^TZ:(?:VALUE=([^:]+):)?(.*)$/;
-    $self->{'__vcard'}{tz} = $1;
+    $vcard->{tz} = $1;
   }
 
   # GEO
   elsif ($ln =~ /^G/) {
     $ln =~ /^GEO:([^;]+);(.*)$/;
-    $self->{'__vcard'}{geo} = {lat=>$1,lon=>$2};
+    $vcard->{geo} = {lat=>$1,lon=>$2};
   }
 
   # TITLE
   elsif ($ln =~ /^TI/) {
     $ln =~ /^TITLE:(.*)$/;
-    $self->{'__vcard'}{title} = $1;
+    $vcard->{title} = $1;
   }
 
   # ROLE
   elsif ($ln =~ /^R/) {
     $ln =~ /^ROLE:(.*)$/;
-    $self->{'__vcard'}{role} = $1;
+    $vcard->{role} = $1;
   }
 
   # LOGO
   elsif ($ln =~ /^L/) {
     $ln =~ /^LOGO;(?:VALUE=(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/;
-    $self->{'__vcard'}{logo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
+    $vcard->{logo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
   }
 
   # AGENT
   elsif ($ln =~ /^AG/) {
+    $ln =~ /^AGENT(;VALUE=uri)?:(.*)$/;
+
+    if ($1) {
+      $vcard->{agent}{'uri'} = $2;
+    }
+
+    $vcard->{'__isagent'}   = 1;
+
+    # Note the '.='
+    # It is possible that we are dealing
+    # with nested AGENT properties. Ugh.
+    $vcard->{agent}{vcard} .= "$2\n";
   }
 
   # ORG
   elsif ($ln =~ /^O/) {
     $ln =~ /^ORG:([^;]+);([^;]+);(.*)$/;
-    $self->{'__vcard'}{org} = {name=>$1,unit=>$2};
+    $vcard->{org} = {name=>$1,unit=>$2};
   }
 
   # CATEGORIES
   elsif ($ln =~ /^CA/) {
     $ln =~ /^CATEGORIES:(.*)$/;
-    $self->{'__vcard'}{categories} = [split(",",$1)];
+    $vcard->{categories} = [split(",",$1)];
   }
 
   # NOTE
   elsif ($ln =~ /^NO/) {
     $ln =~ /^NOTE:(.*)$/;
-    $self->{'__vcard'}{note} = $1;
+    $vcard->{note} = $1;
   }
 
   # PRODID
   elsif ($ln =~ /^PR/) {
     $ln =~ /^PRODID:(.*)$/;
-    $self->{'__vcard'}{prodid} = $1;
+    $vcard->{prodid} = $1;
   }
 
   # REV
   elsif ($ln =~ /^RE/) {
     $ln =~ /^REV:(.*)$/;
-    $self->{'__vcard'}{rev} = $1;
+    $vcard->{rev} = $1;
   }
 
   # SORT-STRING
   elsif ($ln =~ /^SOR/) {
     $ln =~ /^SORT-STRING:(.*)/;
-    $self->{'__vcard'}{'sort'} = $1;
+    $vcard->{'sort'} = $1;
   }
 
   # SOUND
   elsif ($ln =~ /^SOU/) {
     $ln =~ /^SOUND:TYPE=BASIC;(VALUE|ENCODING)=([buri]):(.*)$/;
-    $self->{'__vcard'}{'sound'} = ($1 eq "VALUE") ? {uri=>$2} : {b64=>$2};
+    $vcard->{'sound'} = ($1 eq "VALUE") ? {uri=>$2} : {b64=>$2};
   }
 
   # UID
   elsif ($ln =~ /^UI/) {
     $ln =~ /^UID:(.*)$/;
-    $self->{'__vcard'}{uid} = $1;
+    $vcard->{uid} = $1;
   }
 
   # URL
   elsif ($ln =~ /^UR/) {
     $ln =~ /^URL:(.*)$/;
-    push @{$self->{'__vcard'}{url}},$1;
+    push @{$vcard->{url}},$1;
   }
 
   # CLASS
   elsif ($ln =~ /^CL/) {
     $ln =~ /^CLASS:(.*)$/;
-    $self->{'__vcard'}{class} = $1;
+    $vcard->{class} = $1;
   }
 
   # KEY
   elsif ($ln =~ /^K/) {
     $ln =~ /^KEY;ENCODING=b:(.*)$/;
-    $self->{'__vcard'}{'key'} = $1;
+    $vcard->{'key'} = $1;
   }
 
   # X-CUSTOM
   elsif ($ln =~ /^X/) {
     $ln =~ /^X-CUSTOM;([^:]+):(.*)$/;
-    push @{$self->{'__vcard'}{'x-custom'}}, {$1=>$2};
+    push @{$vcard->{'x-custom'}}, {$1=>$2};
   }
 
   # END:vCard
   elsif ($ln =~ /^EN/) {
-    $self->_vcard();
+    $self->_render_vcard($vcard);
+
+    # We return 0 explicitly since that
+    # is the signal to the calling method
+    # that %$vcard should be emptied.
+    return 0;
   }
 
+  return 1
+}
+
+sub start_document {
+  my $self = shift;
+
+  $self->SUPER::start_document();
+  $self->SUPER::xml_decl({Version=>"1.0"});
+  # Add DOCTYPE stuff for X-LABEL here
+  $self->start_prefix_mapping({Prefix=>"",NamespaceURI=>NS->{VCARD}});
+  $self->SUPER::start_element({Name=>"vCardSet"});
   return 1;
 }
 
-sub _vcard {
+sub end_document {
   my $self = shift;
+
+  $self->SUPER::end_element({Name=>"vCardSet"});
+  $self->end_prefix_mapping({Prefix=>""});
+  $self->SUPER::end_document();
+  return 1;
+}
+
+sub _render_vcard {
+  my $self  = shift;
+  my $vcard = shift;
 
   # See also : comments in &_parse()
 
@@ -325,57 +394,52 @@ sub _vcard {
 	       "{}version" => {Name=>"version",
 			       Value=>VCARD_VERSION},
 	       "{}class"=>{Name=>"class",
-			   Value=>($self->{'__vcard'}->{class} || "PUBLIC")},
+			   Value=>($vcard->{class} || "PUBLIC")},
 	      };
 
   foreach ("uid","lang","rev","prodid") {
-    if (exists($self->{'__vcard'}->{$_})) {
+    if (exists($vcard->{$_})) {
       $attrs->{"{}$_"} = {Name=>$_,
-			  Value=>$self->{'__vcard'}->{$_}};
+			  Value=>$vcard->{$_}};
     }
   }
 
   #
 
-  $self->SUPER::start_document();
-  $self->SUPER::xml_decl({Version=>"1.0"});
-
-  $self->start_prefix_mapping({Prefix=>"",NamespaceURI=>NS->{VCARD}});
-  $self->SUPER::start_element({Name=>"vCardSet"});
   $self->SUPER::start_element({Name=>"vCard",Attributes=>$attrs});
 
   #
 
   # FN:
-  $self->_pcdata({name=>"fn",value=>$self->{'__vcard'}{'fn'}});
+  $self->_pcdata({name=>"fn",value=>$vcard->{'fn'}});
 
   # N:
   $self->SUPER::start_element({Name=>"n"});
 
   foreach ("family","given","other","prefix","suffix") {
-    $self->_pcdata({name=>$_,value=>$self->{'__vcard'}{'n'}{$_}});
+    $self->_pcdata({name=>$_,value=>$vcard->{'n'}{$_}});
   }
 
   $self->SUPER::end_element({Name=>"n"});
 
   # NICKNAME:
-  if (exists($self->{'__vcard'}{'nickname'})) {
-    $self->_pcdata({name=>"nickname",value=>$self->{'__vcard'}{'nickname'}});
+  if (exists($vcard->{'nickname'})) {
+    $self->_pcdata({name=>"nickname",value=>$vcard->{'nickname'}});
   }
 
   # PHOTO:
-  if (exists($self->{'__vcard'}{'photo'})) {
-    $self->_media({name=>"photo",%{$self->{'__vcard'}{photo}}});
+  if (exists($vcard->{'photo'})) {
+    $self->_media({name=>"photo",%{$vcard->{photo}}});
   }
 
   # BDAY:
-  if (exists($self->{'__vcard'}{'bday'})) {
-    $self->_pcdata({name=>"bday",value=>$self->{'__vcard'}{'bday'}});
+  if (exists($vcard->{'bday'})) {
+    $self->_pcdata({name=>"bday",value=>$vcard->{'bday'}});
   }
 
   # ADR:
-  if (ref($self->{'__vcard'}{'adr'}) eq "ARRAY") {
-    foreach my $adr (@{$self->{'__vcard'}{'adr'}}) {
+  if (ref($vcard->{'adr'}) eq "ARRAY") {
+    foreach my $adr (@{$vcard->{'adr'}}) {
 
       $self->SUPER::start_element({Name=>"adr",Attributes=>{"{}del.type"=>{Name=>"del.type",Value=>$adr->{type}}}});
 
@@ -390,108 +454,117 @@ sub _vcard {
   # LABEL
   # $self->label();
 
-  if (ref($self->{'__vcard'}{'tel'}) eq "ARRAY") {
-    foreach (@{$self->{'__vcard'}{'tel'}}) {
+  if (ref($vcard->{'tel'}) eq "ARRAY") {
+    foreach (@{$vcard->{'tel'}}) {
       $self->_pcdata({name=>"tel",value=>$_->{number},attrs=>{"{}tel.type"=>{Name=>"tel.type",Value=>$_->{type}}}});
     }
   }
 
   # EMAIL:
-  if (ref($self->{'__vcard'}{'email'}) eq "ARRAY") {
-    foreach (@{$self->{'__vcard'}{'email'}}) {
+  if (ref($vcard->{'email'}) eq "ARRAY") {
+    foreach (@{$vcard->{'email'}}) {
       $self->_pcdata({name=>"email",value=>$_->{address},attrs=>{"{}email.type"=>{Name=>"email.type",Value=>$_->{type}}}});
     }
   }
 
   # MAILER:
-  if (exists($self->{'__vcard'}{'mailer'})) {
-    $self->_pcdata({name=>"mailer",value=>$self->{'__vcard'}{'mailer'}});
+  if (exists($vcard->{'mailer'})) {
+    $self->_pcdata({name=>"mailer",value=>$vcard->{'mailer'}});
   }
 
   # TZ:
-  if (exists($self->{'__vcard'}{'tz'})) {
-    $self->_pcdata({name=>"tz",value=>$self->{'__vcard'}{'tz'}});
+  if (exists($vcard->{'tz'})) {
+    $self->_pcdata({name=>"tz",value=>$vcard->{'tz'}});
   }
 
   # GEO:
-  if (exists($self->{'__vcard'}{'geo'})) {
+  if (exists($vcard->{'geo'})) {
     $self->SUPER::start_element({Name=>"geo"});
-    $self->_pcdata({name=>"lat",value=>$self->{'__vcard'}{'geo'}{'lat'}});
-    $self->_pcdata({name=>"lon",value=>$self->{'__vcard'}{'geo'}{'lon'}});
+    $self->_pcdata({name=>"lat",value=>$vcard->{'geo'}{'lat'}});
+    $self->_pcdata({name=>"lon",value=>$vcard->{'geo'}{'lon'}});
     $self->SUPER::end_element({Name=>"geo"});
   }
 
   # TITLE:
-  if (exists($self->{'__vcard'}{'title'})) {
-    $self->_pcdata({name=>"title",value=>$self->{'__vcard'}{'title'}});
+  if (exists($vcard->{'title'})) {
+    $self->_pcdata({name=>"title",value=>$vcard->{'title'}});
   }
 
   # ROLE
-  if (exists($self->{'__vcard'}{'role'})) {
-    $self->_pcdata({name=>"role",value=>$self->{'__vcard'}{'role'}});
+  if (exists($vcard->{'role'})) {
+    $self->_pcdata({name=>"role",value=>$vcard->{'role'}});
   }
 
   # LOGO:
-  if (exists($self->{'__vcard'}{'logo'})) {
-    $self->_media({name=>"logo",%{$self->{'__vcard'}{'logo'}}});
+  if (exists($vcard->{'logo'})) {
+    $self->_media({name=>"logo",%{$vcard->{'logo'}}});
   }
 
   # AGENT:
-  # $self->agent();
+  if (exists($vcard->{agent})) {
+    $self->SUPER::start_element({Name=>"agent"});
+
+    if ($vcard->{agent}{uri}) {
+      $self->_pcdata({name=>"extref",attrs=>{"{}uri"=>{Name=>"uri",
+						       Value=>$vcard->{'agent'}{'uri'}}}
+		     });
+    }
+
+    else {
+      $self->_parse_str($vcard->{agent}{vcard});
+    }
+
+    $self->SUPER::end_element({Name=>"agent"});
+  }
 
   # ORG:
-  if (exists($self->{'__vcard'}{'org'})) {
+  if (exists($vcard->{'org'})) {
     $self->SUPER::start_element({Name=>"org"});
-    $self->_pcdata({name=>"orgnam",value=>$self->{'__vcard'}{'org'}{'name'}});
-    $self->_pcdata({name=>"orgunit",value=>$self->{'__vcard'}{'org'}{'unit'}});
+    $self->_pcdata({name=>"orgnam",value=>$vcard->{'org'}{'name'}});
+    $self->_pcdata({name=>"orgunit",value=>$vcard->{'org'}{'unit'}});
     $self->SUPER::end_element({Name=>"org"});
   }
 
   # CATEGORIES:
-  if (ref($self->{'__vcard'}{'categories'}) eq "ARRAY") {
+  if (ref($vcard->{'categories'}) eq "ARRAY") {
     $self->SUPER::start_element({Name=>"categories"});
-    foreach (@{$self->{'__vcard'}{categories}}) {
+    foreach (@{$vcard->{categories}}) {
       $self->_pcdata({name=>"item",value=>$_});
     }
     $self->SUPER::end_element({Name=>"categories"});
   }
 
   # NOTE:
-  if (exists($self->{'__vcard'}{'note'})) {
-    $self->_pcdata({name=>"note",value=>$self->{'__vcard'}{'note'}});
+  if (exists($vcard->{'note'})) {
+    $self->_pcdata({name=>"note",value=>$vcard->{'note'}});
   }
 
   # SORT:
-  if (exists($self->{'__vcard'}{'sort'})) {
-    $self->_pcdata({name=>"sort",value=>$self->{'__vcard'}{'sort'}});
+  if (exists($vcard->{'sort'})) {
+    $self->_pcdata({name=>"sort",value=>$vcard->{'sort'}});
   }
 
   # SOUND:
-  if (exists($self->{'__vcard'}{'sound'})) {
-    $self->_media({name=>"sound",%{$self->{'__vcard'}{'sound'}}});
+  if (exists($vcard->{'sound'})) {
+    $self->_media({name=>"sound",%{$vcard->{'sound'}}});
   }
 
   # URL:
-  if (ref($self->{'__vcard'}{'url'}) eq "ARRAY") {
-    foreach (@{$self->{'__vcard'}{'url'}}) {
+  if (ref($vcard->{'url'}) eq "ARRAY") {
+    foreach (@{$vcard->{'url'}}) {
       $self->_pcdata({name=>"url",Attributes=>{"{}uri"=>{Name=>"uri",Value=>$_}}});
     }
   }
 
   # KEY:
-  if (exists($self->{'__vcard'}{'key'})) {
-    $self->_media($self->{'__vcard'}{key});
+  if (exists($vcard->{'key'})) {
+    $self->_media($vcard->{key});
   }
 
   # $self->xcustom();
 
   $self->SUPER::end_element({Name=>"vCard"});
-  $self->SUPER::end_element({Name=>"vCardSet"});
-  $self->end_prefix_mapping({Prefix=>""});
 
-  $self->SUPER::end_document();
-
-  $self->{'__vcard'} = {};
   return 1;
 }
 
@@ -523,7 +596,9 @@ sub _media {
   $self->SUPER::start_element({Name=>$data->{name},Attributes=>$attrs});
 
   if ($data->{url}) {
-     $self->_pcdata({name=>"extref",value=>$data->{url}});
+     $self->_pcdata({name=>"extref",attrs=>{"{}uri"=>{Name=>"uri",
+						      Value=>$data->{url}}}
+		    });
   }
 
   else {
@@ -534,15 +609,21 @@ sub _media {
   return 1;
 }
 
+sub _newkey {
+  my $self = shift;
+  my @keys = sort {$a<=>$b} keys %{$self->{'__vcards'}};
+  return $keys[$#keys] + 1;
+}
+
 sub DESTROY {}
 
 =head1 VERSION
 
-0.01
+0.02
 
 =head1 DATE
 
-November 04, 2002
+November 05, 2002
 
 =head1 AUTHOR
 
@@ -554,7 +635,12 @@ Aaron Straup Cope
 
 =item *
 
-Add support for I<AGENT> property
+Better (proper) support for properties that pan multiple lines
+
+=item *
+
+Better checks to prevent empty elements from being include in final
+output.
 
 =item *
 

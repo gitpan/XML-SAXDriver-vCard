@@ -1,13 +1,18 @@
 use strict;
 use Test::More;
 
+my $use_writer = 0;
+my $use_simple = 0;
+
 eval "require XML::SAX::Writer";
-my $use_writer   = ($@) ? 0 : 1;
+$use_writer = ($@) ? 0 : 1;
 
-eval "require XML::Simple";
-my $use_simple = ($@) ? 0 : 1;
+if ($use_writer) {
+  eval "require XML::Simple";
+  $use_simple = ($@) ? 0 : 1;
+}
 
-	    plan tests => (6 + $use_writer + $use_simple);
+plan tests => (6 + $use_writer + $use_simple);
 
 use_ok("XML::SAXDriver::vCard");
 use_ok("XML::SAX::ParserFactory");

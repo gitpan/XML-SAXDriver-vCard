@@ -18,11 +18,16 @@ UID:2456383
 END:vCard
 VCARD
 
-eval "require XML::SAX::Writer";
-my $use_writer   = ($@) ? 0 : 1;
+my $use_writer = 0;
+my $use_simple = 0;
 
-eval "require XML::Simple";
-my $use_simple = ($@) ? 0 : 1;
+eval "require XML::SAX::Writer";
+$use_writer = ($@) ? 0 : 1;
+
+if ($use_writer) {
+  eval "require XML::Simple";
+  $use_simple = ($@) ? 0 : 1;
+}
 
 plan tests => (8 + $use_writer + $use_simple);
 
