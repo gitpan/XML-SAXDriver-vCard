@@ -29,7 +29,7 @@ if ($use_writer) {
 }
 
 $parser = XML::SAX::ParserFactory->parser(Handler=>$writer);
-like($parser,qr/XML::SAX::(?:Pure|Exp|LibX)/,"The object isa ".ref($parser));
+can_ok($parser,"get_handler");
 
 $driver = XML::SAXDriver::vCard->new(Handler=>$parser);
 isa_ok($driver,"XML::SAXDriver::vCard");
@@ -41,3 +41,5 @@ if ($use_simple) {
   cmp_ok($ref->{'vCard'}{'adr'}{'street'},"eq","123 Main Street",$ref->{'vCard'}{'adr'}{'street'});
 
 }
+
+# $Id: 003-parse_uri.t,v 1.4 2003/02/17 15:18:09 asc Exp $

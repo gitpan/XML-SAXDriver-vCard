@@ -23,7 +23,7 @@ use strict;
 package XML::SAXDriver::vCard;
 use base qw (XML::SAX::Base);
 
-$XML::SAXDriver::vCard::VERSION = '0.02';
+$XML::SAXDriver::vCard::VERSION = '0.04';
 
 use constant NS => {
 		    "VCARD" => "http://www.ietf.org/internet-drafts/draft-dawson-vCard-xml-dtd-04.txt",
@@ -94,10 +94,17 @@ sub parse_uri {
   }
 
   require LWP::Simple;
+
+  if (! LWP::Simple::head($uri)) {
+    die "Unable to retreive remote vCard : ".getprint($uri)."\n";
+  }
+
   return $self->parse(LWP::Simple::get($uri));
 }
 
 # Private methods
+
+# Section 2.4.2 for discussion of chunks
 
 sub _parse_str {
   my $self = shift;
@@ -138,9 +145,10 @@ sub _parse_ln {
   my $ln    = shift;
   my $vcard = shift;
 
-  # Danger, Will Robinson!
-  # Un-SAX like behaviour ahead.Specifically, we are going to
-  # store record data in a private hash ref belonging to the
+  # Danger, Will Robinson! Un-SAX like behaviour ahead.
+
+  # Specifically, we are going tostore record data in a 
+  # private hash ref belonging to the
   # object. I am not happy about this either, however we have to
   # do this because the vCard UID property is mapped to XML as
   # an attribute of the vcard element. Since we have no idea
@@ -157,7 +165,7 @@ sub _parse_ln {
 
   # These are the properties you are looking for.
 
-  if ($ln =~ /^[DHIJQVWYZ]/) {
+  if ($ln =~ /^[DHIJQVWYZ]/i) {
     return 1;
   }
 
@@ -167,15 +175,21 @@ sub _parse_ln {
 
   elsif ($vcard->{'__isagent'}) {
     $vcard->{agent}{vcard} .= $ln."\n";
-    if ($ln =~ /^EN/) { $vcard->{'__isagent'} = 0; }
+    if ($ln =~ /^EN/i) { $vcard->{'__isagent'} = 0; }
     return 1;
   }
 
   else {}
 
+  # SOURCE
+  if ($ln =~ /^SOUR/i) {
+    $ln =~ /^SOURCE:(.*)/i;
+    $vcard->{source} = $1;
+  }
+
   # FN
-  if ($ln =~ /^F/) {
-    $ln =~ /^FN:(.*)$/;
+  elsif ($ln =~ /^F/i) {
+    $ln =~ /^FN:(.*)$/i;
     $vcard->{fn} = $1;
   }
 
@@ -183,89 +197,89 @@ sub _parse_ln {
   elsif ($ln =~ /^N:/i) {
     # Family Name, Given Name, Additional Names, 
     # Honorific Prefixes, and Honorific Suffixes.
-    $ln =~ /^N:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/;
+    $ln =~ /^N:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/i;
     $vcard->{n} = {family=>$1,given=>$2,other=>$3,prefixes=>$4,suffixes=>$5};
   }
 
   # NICKNAME
-  elsif ($ln =~ /^NI/) {
-    $ln =~ /^NICKNAME:(.*)$/;
+  elsif ($ln =~ /^NI/i) {
+    $ln =~ /^NICKNAME:(.*)$/i;
     $vcard->{nickname} = $1;
   }
 
   # PHOTO
-  elsif ($ln =~ /^PHOT/) {
-    $ln =~ /^PHOTO;(?:VALUE=uri:(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/;
+  elsif ($ln =~ /^PHOT/i) {
+    $ln =~ /^PHOTO;(?:VALUE=uri:(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/i;
     $vcard->{photo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
   }
 
   # BDAY
-  elsif ($ln =~ /^BD/) {
-    $ln =~ /^BDAY:(.*)$/;
+  elsif ($ln =~ /^BD/i) {
+    $ln =~ /^BDAY:(.*)$/i;
     $vcard->{bday} = $1;
   }
 
   # ADR
-  if ($ln =~ /^AD/) {
+  if ($ln =~ /^AD/i) {
     $ln =~ /^ADR;TYPE=([^:]+)?:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/i;
     push @{$vcard->{adr}} , {"type"=>$1,pobox=>$2,extadr=>$3,street=>$4,locality=>$4,region=>$5,pcode=>$6,country=>$7};
   }
 
   # LABEL
-  elsif ($ln =~ /^L/) {
+  elsif ($ln =~ /^L/i) {
   }
 
   # TEL
-  elsif ($ln =~ /^TE/) {
-    $ln =~ /^TEL;TYPE=([^:]+)?:(.*)$/;
+  elsif ($ln =~ /^TE/i) {
+    $ln =~ /^TEL;TYPE=([^:]+)?:(.*)$/i;
     push @{$vcard->{tel}},{"type"=>$1,number=>$2};
   }
 
   # EMAIL
-  elsif ($ln =~ /^EM/) {
-    $ln =~ /^EMAIL;([^:]+)?:(.*)$/;
+  elsif ($ln =~ /^EM/i) {
+    $ln =~ /^EMAIL;([^:]+)?:(.*)$/i;
     push @{$vcard->{email}},{"type"=>$1,address=>$2};
   }
 
   # MAILER
-  elsif ($ln =~ /^M/) {
-    $ln =~ /^MAILER;(.*)$/;
+  elsif ($ln =~ /^M/i) {
+    $ln =~ /^MAILER;(.*)$/i;
     $vcard->{mailer} = $1;
   }
 
   # TZ
-  elsif ($ln =~ /^TZ/) {
-    $ln =~ /^TZ:(?:VALUE=([^:]+):)?(.*)$/;
+  elsif ($ln =~ /^TZ/i) {
+    $ln =~ /^TZ:(?:VALUE=([^:]+):)?(.*)$/i;
     $vcard->{tz} = $1;
   }
 
   # GEO
-  elsif ($ln =~ /^G/) {
-    $ln =~ /^GEO:([^;]+);(.*)$/;
+  elsif ($ln =~ /^G/i) {
+    $ln =~ /^GEO:([^;]+);(.*)$/i;
     $vcard->{geo} = {lat=>$1,lon=>$2};
   }
 
   # TITLE
-  elsif ($ln =~ /^TI/) {
-    $ln =~ /^TITLE:(.*)$/;
+  elsif ($ln =~ /^TI/i) {
+    $ln =~ /^TITLE:(.*)$/i;
     $vcard->{title} = $1;
   }
 
   # ROLE
-  elsif ($ln =~ /^R/) {
-    $ln =~ /^ROLE:(.*)$/;
+  elsif ($ln =~ /^R/i) {
+    $ln =~ /^ROLE:(.*)$/i;
     $vcard->{role} = $1;
   }
 
   # LOGO
-  elsif ($ln =~ /^L/) {
-    $ln =~ /^LOGO;(?:VALUE=(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/;
+  elsif ($ln =~ /^L/i) {
+    $ln =~ /^LOGO;(?:VALUE=(.*)|ENCODING=b;TYPE=([^:]+):(.*))$/i;
     $vcard->{logo} = ($2) ? {type=>$1,b64=>$2} : {url=>$1};
   }
 
   # AGENT
-  elsif ($ln =~ /^AG/) {
-    $ln =~ /^AGENT(;VALUE=uri)?:(.*)$/;
+  elsif ($ln =~ /^AG/i) {
+    $ln =~ /^AGENT(;VALUE=uri)?:(.*)$/i;
 
     if ($1) {
       $vcard->{agent}{'uri'} = $2;
@@ -280,79 +294,79 @@ sub _parse_ln {
   }
 
   # ORG
-  elsif ($ln =~ /^O/) {
-    $ln =~ /^ORG:([^;]+);([^;]+);(.*)$/;
+  elsif ($ln =~ /^O/i) {
+    $ln =~ /^ORG:([^;]+);([^;]+);(.*)$/i;
     $vcard->{org} = {name=>$1,unit=>$2};
   }
 
   # CATEGORIES
-  elsif ($ln =~ /^CA/) {
-    $ln =~ /^CATEGORIES:(.*)$/;
+  elsif ($ln =~ /^CA/i) {
+    $ln =~ /^CATEGORIES:(.*)$/i;
     $vcard->{categories} = [split(",",$1)];
   }
 
   # NOTE
-  elsif ($ln =~ /^NO/) {
-    $ln =~ /^NOTE:(.*)$/;
+  elsif ($ln =~ /^NO/i) {
+    $ln =~ /^NOTE:(.*)$/i;
     $vcard->{note} = $1;
   }
 
   # PRODID
-  elsif ($ln =~ /^PR/) {
-    $ln =~ /^PRODID:(.*)$/;
+  elsif ($ln =~ /^PR/i) {
+    $ln =~ /^PRODID:(.*)$/i;
     $vcard->{prodid} = $1;
   }
 
   # REV
-  elsif ($ln =~ /^RE/) {
-    $ln =~ /^REV:(.*)$/;
+  elsif ($ln =~ /^RE/i) {
+    $ln =~ /^REV:(.*)$/i;
     $vcard->{rev} = $1;
   }
 
   # SORT-STRING
-  elsif ($ln =~ /^SOR/) {
-    $ln =~ /^SORT-STRING:(.*)/;
+  elsif ($ln =~ /^SOR/i) {
+    $ln =~ /^SORT-STRING:(.*)/i;
     $vcard->{'sort'} = $1;
   }
 
   # SOUND
-  elsif ($ln =~ /^SOU/) {
-    $ln =~ /^SOUND:TYPE=BASIC;(VALUE|ENCODING)=([buri]):(.*)$/;
+  elsif ($ln =~ /^SOUN/i) {
+    $ln =~ /^SOUND:TYPE=BASIC;(VALUE|ENCODING)=([buri]):(.*)$/i;
     $vcard->{'sound'} = ($1 eq "VALUE") ? {uri=>$2} : {b64=>$2};
   }
 
   # UID
-  elsif ($ln =~ /^UI/) {
-    $ln =~ /^UID:(.*)$/;
+  elsif ($ln =~ /^UI/i) {
+    $ln =~ /^UID:(.*)$/i;
     $vcard->{uid} = $1;
   }
 
   # URL
-  elsif ($ln =~ /^UR/) {
-    $ln =~ /^URL:(.*)$/;
+  elsif ($ln =~ /^UR/i) {
+    $ln =~ /^URL:(.*)$/i;
     push @{$vcard->{url}},$1;
   }
 
   # CLASS
-  elsif ($ln =~ /^CL/) {
-    $ln =~ /^CLASS:(.*)$/;
+  elsif ($ln =~ /^CL/i) {
+    $ln =~ /^CLASS:(.*)$/i;
     $vcard->{class} = $1;
   }
 
   # KEY
-  elsif ($ln =~ /^K/) {
-    $ln =~ /^KEY;ENCODING=b:(.*)$/;
+  elsif ($ln =~ /^K/i) {
+    $ln =~ /^KEY;ENCODING=b:(.*)$/i;
     $vcard->{'key'} = $1;
   }
 
   # X-CUSTOM
-  elsif ($ln =~ /^X/) {
-    $ln =~ /^X-CUSTOM;([^:]+):(.*)$/;
+  elsif ($ln =~ /^X/i) {
+    $ln =~ /^X-CUSTOM;([^:]+):(.*)$/i;
     push @{$vcard->{'x-custom'}}, {$1=>$2};
   }
 
   # END:vCard
-  elsif ($ln =~ /^EN/) {
+  elsif ($ln =~ /^EN/i) {
     $self->_render_vcard($vcard);
 
     # We return 0 explicitly since that
@@ -441,7 +455,9 @@ sub _render_vcard {
   if (ref($vcard->{'adr'}) eq "ARRAY") {
     foreach my $adr (@{$vcard->{'adr'}}) {
 
-      $self->SUPER::start_element({Name=>"adr",Attributes=>{"{}del.type"=>{Name=>"del.type",Value=>$adr->{type}}}});
+      $self->SUPER::start_element({Name=>"adr",
+				   Attributes=>{"{}del.type"=>{Name=>"del.type",Value=>$adr->{type}}}
+				  });
 
       foreach ("pobox","extadr","street","locality","region","pcode","country") {
 	$self->_pcdata({name=>$_,value=>$adr->{$_}});
@@ -456,25 +472,33 @@ sub _render_vcard {
 
   if (ref($vcard->{'tel'}) eq "ARRAY") {
     foreach (@{$vcard->{'tel'}}) {
-      $self->_pcdata({name=>"tel",value=>$_->{number},attrs=>{"{}tel.type"=>{Name=>"tel.type",Value=>$_->{type}}}});
+      $self->_pcdata({name=>"tel",
+		      value=>$_->{number},
+		      attrs=>{"{}tel.type"=>{Name=>"tel.type",Value=>$_->{type}}}
+		     });
     }
   }
 
   # EMAIL:
   if (ref($vcard->{'email'}) eq "ARRAY") {
     foreach (@{$vcard->{'email'}}) {
-      $self->_pcdata({name=>"email",value=>$_->{address},attrs=>{"{}email.type"=>{Name=>"email.type",Value=>$_->{type}}}});
+      $self->_pcdata({name=>"email",
+		      value=>$_->{address},
+		      attrs=>{"{}email.type"=>{Name=>"email.type",Value=>$_->{type}}}
+		     });
     }
   }
 
   # MAILER:
   if (exists($vcard->{'mailer'})) {
-    $self->_pcdata({name=>"mailer",value=>$vcard->{'mailer'}});
+    $self->_pcdata({name=>"mailer",
+		    value=>$vcard->{'mailer'}});
   }
 
   # TZ:
   if (exists($vcard->{'tz'})) {
-    $self->_pcdata({name=>"tz",value=>$vcard->{'tz'}});
+    $self->_pcdata({name=>"tz",
+		    value=>$vcard->{'tz'}});
   }
 
   # GEO:
@@ -552,7 +576,8 @@ sub _render_vcard {
   # URL:
   if (ref($vcard->{'url'}) eq "ARRAY") {
     foreach (@{$vcard->{'url'}}) {
-      $self->_pcdata({name=>"url",Attributes=>{"{}uri"=>{Name=>"uri",Value=>$_}}});
+      $self->_pcdata({name=>"url",
+		      Attributes=>{"{}uri"=>{Name=>"uri",Value=>$_}}});
     }
   }
 
@@ -609,25 +634,29 @@ sub _media {
   return 1;
 }
 
-sub _newkey {
-  my $self = shift;
-  my @keys = sort {$a<=>$b} keys %{$self->{'__vcards'}};
-  return $keys[$#keys] + 1;
-}
-
 sub DESTROY {}
 
 =head1 VERSION
 
-0.02
+0.04
 
 =head1 DATE
 
-November 05, 2002
+February 17, 2003
 
 =head1 AUTHOR
 
 Aaron Straup Cope
+
+=head1 NOTES
+
+=head2 What about representing vCard objects in RDF/XML?
+
+It's not going to happen here.
+
+I might write a pair of vcard-rdfxml to vcard-xml filters in the 
+future. If you're chomping at the bit to do this yourself, please,
+go nuts.
 
 =head1 TO DO
 
@@ -635,7 +664,25 @@ Aaron Straup Cope
 
 =item *
 
-Better (proper) support for properties that pan multiple lines
+Support list-style parameters for type parameter values, which is apparently 
+what Apple has chosen even though it is not the default. Alas...
+
+I<This is planned for version 0.05>
+
+=item *
+
+Better (proper) support for properties that span multiple lines. See also:
+
+ section 5.8.1.  Line delimiting and folding (RFC 2425)
+ section 2.6     Line Delimiting and Folding (RFC 2426)
+
+I<This is planned for version 0.05 or 0.06>
+
+=item *
+
+Wrap lines at 75 chars for media thingies.
+
+I<This is planned for version 0.05 or 0.06>
 
 =item *
 
@@ -655,10 +702,6 @@ in the vcard-xml DTD :-(
 
 Add support for pronounciation attribute extension
 
-=item *
-
-RDF support. Maybe. If I'm bored, or something.
-
 =back
 
 =head1 SEE ALSO
@@ -671,6 +714,8 @@ http://www.globecom.net/ietf/draft/draft-dawson-vcard-xml-dtd-03.html
 
 http://www.imc.org/pdi/vcard-pronunciation.html
 
+http://www.w3.org/TR/vcard-rdf
+
 =head1 BUGS
 
 Sadly, there are probably a few.
@@ -679,7 +724,9 @@ Please report all bugs via http://rt.cpan.org
 
 =head1 LICENSE
 
-Copyright (c) 2002, Aaron Straup Cope. All Rights Reserved.
+Copyright (c) 2002-2003, Aaron Straup Cope. All Rights Reserved.
+
+This is free software, you may use it and distribute it under the same terms as Perl itself.
 
 =cut
 

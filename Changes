@@ -1,5 +1,28 @@
 Revision history for Perl extension XML::SAXDriver::vCard
 
+0.04	 Mon Feb 17 2003
+
+	 - Updated to make checks on names case-insenstive (props
+	   to Leo Lapworth for the slap in the head :-)
+
+	 - Updated tests to check for 'get_handle' method for $parser
+
+	 - Added 004-parse-list-types.t which will actually do
+           something in version 0.05
+
+	 - Updated POD
+
+0.03	 Fri Nov 08 2002
+
+	 - Better error handling for $pkg->parse_uri
+
+	 - Added hooks to capture SOURCE property
+
+	 - Updated POD
+
+	 - Updated license to be "same terms as Perl itself"; this also applies
+	   to versions < 0.03. Sorry about that.
+
 0.02	 Tue Nov 05 2002
 
 	 - Added support for the AGENT property
