@@ -1,6 +1,6 @@
 =head1 NAME
 
-XML::SAXDriver::vCard - generate SAX events for vCard 3.0
+XML::SAXDriver::vCard - generate SAX2 events for vCard 3.0
 
 =head1 SYNOPSIS
 
@@ -14,7 +14,7 @@ XML::SAXDriver::vCard - generate SAX events for vCard 3.0
 
 =head1 DESCRIPTION
 
-Generate SAX events for vCard 3.0
+Generate SAX2 events for vCard 3.0
 
 =cut
 
@@ -23,13 +23,17 @@ use strict;
 package XML::SAXDriver::vCard;
 use base qw (XML::SAX::Base);
 
-$XML::SAXDriver::vCard::VERSION = '0.04';
+$XML::SAXDriver::vCard::VERSION = '0.05';
 
 use constant NS => {
 		    "VCARD" => "http://www.ietf.org/internet-drafts/draft-dawson-vCard-xml-dtd-04.txt",
 		   };
 
 use constant VCARD_VERSION => "3.0";
+
+# Can someone please tell me how to derefence constants
+# in regular expressions. You can't, can you....
+my $regexp_type = qr/(?:;(TYPE=(?:(?:\\:|[^:])+)?)?)/i;
 
 =head1 PACKAGE METHODS
 
@@ -220,9 +224,12 @@ sub _parse_ln {
   }
 
   # ADR
+  # Mulitple ADR 'TYPE's may be defined using either as
+  # a parameter list or a value list.
+
   if ($ln =~ /^AD/i) {
-    $ln =~ /^ADR;TYPE=([^:]+)?:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/i;
-    push @{$vcard->{adr}} , {"type"=>$1,pobox=>$2,extadr=>$3,street=>$4,locality=>$4,region=>$5,pcode=>$6,country=>$7};
+    $ln =~ /^ADR$regexp_type:([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?;([^;]+)?$/i;
+    push @{$vcard->{adr}} , {"type"=>$1,pobox=>$2,extadr=>$3,street=>$4,locality=>$5,region=>$6,pcode=>$7,country=>$8};
   }
 
   # LABEL
@@ -231,14 +238,14 @@ sub _parse_ln {
 
   # TEL
   elsif ($ln =~ /^TE/i) {
-    $ln =~ /^TEL;TYPE=([^:]+)?:(.*)$/i;
+    $ln =~ /^TEL$regexp_type?:(.*)$/i;
     push @{$vcard->{tel}},{"type"=>$1,number=>$2};
   }
 
   # EMAIL
   elsif ($ln =~ /^EM/i) {
-    $ln =~ /^EMAIL;([^:]+)?:(.*)$/i;
-    push @{$vcard->{email}},{"type"=>$1,address=>$2};
+    $ln =~ /^EMAIL$regexp_type?:(.*)$/i;
+    push @{$vcard->{email}},{"type"=>($1 || "internet"),address=>$2};
   }
 
   # MAILER
@@ -367,7 +374,7 @@ sub _parse_ln {
 
   # END:vCard
   elsif ($ln =~ /^EN/i) {
-    $self->_render_vcard($vcard);
+    $self->_saxify($vcard);
 
     # We return 0 explicitly since that
     # is the signal to the calling method
@@ -398,7 +405,7 @@ sub end_document {
   return 1;
 }
 
-sub _render_vcard {
+sub _saxify {
   my $self  = shift;
   my $vcard = shift;
 
@@ -455,6 +462,8 @@ sub _render_vcard {
   if (ref($vcard->{'adr'}) eq "ARRAY") {
     foreach my $adr (@{$vcard->{'adr'}}) {
 
+      &_munge_type(\$adr->{type});
+
       $self->SUPER::start_element({Name=>"adr",
 				   Attributes=>{"{}del.type"=>{Name=>"del.type",Value=>$adr->{type}}}
 				  });
@@ -471,20 +480,25 @@ sub _render_vcard {
   # $self->label();
 
   if (ref($vcard->{'tel'}) eq "ARRAY") {
-    foreach (@{$vcard->{'tel'}}) {
-      $self->_pcdata({name=>"tel",
-		      value=>$_->{number},
-		      attrs=>{"{}tel.type"=>{Name=>"tel.type",Value=>$_->{type}}}
+
+    foreach my $t (@{$vcard->{'tel'}}) {
+      &_munge_type(\$t->{type});
+
+      $self->_pcdata({name=>"tel",value=>$t->{number},
+		      attrs=>{"{}tel.type"=>{Name=>"tel.type",Value=>$t->{type}}}
 		     });
     }
   }
 
   # EMAIL:
+
   if (ref($vcard->{'email'}) eq "ARRAY") {
-    foreach (@{$vcard->{'email'}}) {
-      $self->_pcdata({name=>"email",
-		      value=>$_->{address},
-		      attrs=>{"{}email.type"=>{Name=>"email.type",Value=>$_->{type}}}
+
+    foreach my $e (@{$vcard->{'email'}}) {
+      &_munge_type(\$e->{type});
+
+      $self->_pcdata({name=>"email",value=>$e->{address},
+		      attrs=>{"{}email.type"=>{Name=>"email.type",Value=>$e->{type}}}
 		     });
     }
   }
@@ -634,15 +648,31 @@ sub _media {
   return 1;
 }
 
+# Convert all type data into a value list
+
+sub _munge_type {
+  my $sr_str = shift;
+  $$sr_str || return;
+
+  # Remove the leading TYPE=
+  # declaration: see also $regexp_type
+  $$sr_str =~ s/^TYPE=//i;
+
+  # Remove any subsequent TYPE=
+  # thingies and replace them
+  # with commas
+  $$sr_str =~ s/;TYPE=/,/gi;
+}
+
 sub DESTROY {}
 
 =head1 VERSION
 
-0.04
+0.05
 
 =head1 DATE
 
-February 17, 2003
+February 18, 2003
 
 =head1 AUTHOR
 
@@ -654,7 +684,7 @@ Aaron Straup Cope
 
 It's not going to happen here.
 
-I might write a pair of vcard-rdfxml to vcard-xml filters in the 
+I might write a pair of vcard-rdfxml <-> vcard-xml filters in the
 future. If you're chomping at the bit to do this yourself, please,
 go nuts.
 
@@ -664,25 +694,18 @@ go nuts.
 
 =item *
 
-Support list-style parameters for type parameter values, which is apparently 
-what Apple has chosen even though it is not the default. Alas...
-
-I<This is planned for version 0.05>
-
-=item *
-
 Better (proper) support for properties that span multiple lines. See also:
 
  section 5.8.1.  Line delimiting and folding (RFC 2425)
  section 2.6     Line Delimiting and Folding (RFC 2426)
 
-I<This is planned for version 0.05 or 0.06>
+I<This is planned for version 0.06>
 
 =item *
 
 Wrap lines at 75 chars for media thingies.
 
-I<This is planned for version 0.05 or 0.06>
+I<This is planned for version 0.06>
 
 =item *
 

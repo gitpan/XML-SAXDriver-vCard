@@ -6,4 +6,3 @@ MANIFEST
 t/001-parse.t
 t/002-parse_file.t
 t/003-parse_uri.t
-t/004-parse-list-types.t
